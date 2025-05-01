@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+
+import networkx as nx
+import math
+import random
+
+class Explore:
+    def __init__(self, weights, edges):
+        self.universal = nx.DiGraph()
+        self.numnodes = len(weights)
+        for n,(f,w) in enumerate(weights):
+            self.universal.add_node(n, f=f, w=w)
+        for u,v in edges:
+            self.universal.add_edge(u,v)
+        assert nx.is_directed_acyclic_graph(self.universal)
+        self.edges = sorted(self.universal.edges())
+
+    @classmethod
+    def random(cls, nodes, p, szwtrange=10):
+        G = nx.gnp_random_graph(nodes, p, directed=True)
+        weights = [(random.randint(1, szwtrange), random.randint(1, szwtrange)) for _ in range(nodes)]
+        edges = set((u,v) for u,v in G.edges() if u>v)
+        return cls(weights, edges)
+
+    def ensure_connected(self):
+        comps = list(nx.weakly_connected_components(self.universal))
+        c = list(comps[0])
+        for i in range(1, len(comps)):
+            a = random.choice(c)
+            ci = list(comps[i])
+            b = random.choice(ci)
+            c += ci
+            if a > b: a,b = b,a
+            self.universal.add_edge(b,a)
+        assert nx.is_directed_acyclic_graph(self.universal)
+        self.edges = sorted(self.universal.edges())
+
+    def dedupe_edges(self):
+        G = nx.transitive_reduction(self.universal)
+        for u,v in self.edges:
+            if (u,v) not in G.edges:
+                self.universal.remove_edge(u,v)
+        self.edges = sorted(self.universal.edges())
+
+    def get_id(self, G):
+        n = 0
+        for i,(u,v) in enumerate(self.edges):
+            if (u,v) in G.edges() or (v,u) in G.edges(): n += 2**i
+        return n
+
+    def myG(self, n):
+        G = nx.DiGraph()
+        for a in range(self.numnodes):
+            G.add_node(a)
+        for a in self.edges:
+            if n % 2 != 0:
+                G.add_edge(*a)
+            n //= 2
+        return G
+
+    def nums(self):
+        f = []
+        for n in range(2**len(self.edges)):
+            if any(k & n == k for k in f): continue
+            if nx.is_weakly_connected(self.myG(n)):
+                f.append(n)
+        return f
+
+    def get_score(self, k):
+        f, w = 0, 0
+        for v in k:
+            f += self.universal.nodes[v]["f"]
+            w += self.universal.nodes[v]["w"]
+        return f,w
+
+    def find_split_merge(self, G, res, best_children=False, best_q=False):
+        improvable = False
+        n = self.get_id(G)
+        perfect = True
+        candidates = {}
+        best_splits = (-1, [])
+        for (u,v) in G.edges():
+            H = G.copy()
+            H.remove_edge(u,v)
+            k1,k2 = nx.connected_components(H)
+            if (v,u) in self.universal.edges():
+                u,v = v,u
+            if v in k1:
+                k1,k2 = k2,k1
+            f1,s1 = self.get_score(k1)
+            f2,s2 = self.get_score(k2)
+            if f1*s2 >= f2*s1: continue
+            score = f2*s1 - f1*s2
+            if best_children:
+                if v not in candidates or score > candidates[v][0]:
+                    candidates[v] = (score, [])
+                elif score < candidates[v][0]:
+                    continue
+            elif best_q:
+                if score > best_splits[0]:
+                    best_splits = (score, [])
+                elif score < best_splits[0]:
+                    continue
+            perfect = False
+            assert u in k1 and v in k2
+            assert (u,v) in self.edges
+            is_mutual = False
+            for (a,b) in self.edges:
+                if a in k2 and b in k1:
+                    is_mutual = True
+                    H.add_edge(a,b)
+                    k = self.get_id(H)
+                    assert a != v or b != u
+                    assert k != n
+                    if best_children:
+                        candidates[v][1].append((n, k))
+                    elif best_q:
+                        best_splits[1].append((n,k))
+                    else:
+                        res.add_edge(n,k)
+                    H.remove_edge(a,b)
+            if not is_mutual:
+                res.add_edge(n, 0)
+                improvable = True
+        if best_children:
+            for v in candidates:
+                for n,k in candidates[v][1]:
+                    res.add_edge(n,k)
+        elif best_splits:
+            for n,k in best_splits[1]:
+                res.add_edge(n,k)
+        if perfect:
+            res.add_edge(n,-1)
+        return improvable
+
+    def compare(self, n1, n2):
+        ca, cb = nx.weakly_connected_components(self.myG(n1 & n2))
+        e1 = int(math.log((n1|n2)^n2,2))
+        e2 = int(math.log((n1|n2)^n1,2))
+        return "%s vs %s \\n %s vs %s" % ("".join(chr(65+x) for x in ca), "".join(chr(65+x) for x in cb), edge_alpha(*self.edges[e1]), edge_alpha(*self.edges[e2]))
+
+def edge_alpha(u,v):
+    return "%s -> %s" % (chr(65+u), chr(65+v))
+
+def print_alpha(G):
+    for (u,v) in sorted(G.edges()):
+        print("    %s;" % (edge_alpha(u,v)))
+    for u in G.nodes():
+        print("    %s [label=\"%s %s/%s\"];" % (chr(65+u), chr(65+u), G.nodes[u]["f"], G.nodes[u]["w"]))
+
+def print_undir(G):
+    print("    { edge [dir=none];")
+    for (u,v) in sorted(G.edges()):
+        if u == 0:
+            u,v = v,u
+        #if v:
+        #    print("      %d -> %d [label=\"%s\"];" % (u, v, exp.compare(u,v)))
+        #else:
+        #    print("      %d -> %d;" % (u, v))
+        print("      %s;" % (edge_alpha(u, v)))
+    print("    }")
+
+def print_dir(G):
+    print("    {")
+    for (u,v) in sorted(G.edges()):
+        assert u != 0
+        print("      %d -> %d;" % (u, v))
+    print("    }")
+
+def print_my(exp):
+    n = exp.universal.nodes
+    print("MY_WEIGHTS =", [(n[i]["f"], n[i]["w"]) for i in n()])
+    print("MY_EDGES =", exp.universal.edges)
+
+def spanning_trees(G):
+    H = nx.Graph()
+    for u,v in G.edges:
+        H.add_edge(u,v,weight=1)
+    return nx.algorithms.tree.mst.SpanningTreeIterator(H)
+
+def check_it(exp, best_children=False, best_q=False):
+    if not nx.is_weakly_connected(exp.universal):
+         return -1
+
+    n=0
+    H_st = nx.DiGraph()
+    for i in spanning_trees(exp.universal):
+        imp = exp.find_split_merge(i, H_st, best_children=best_children, best_q=best_q)
+        if imp: return -2
+
+    if 0 in H_st.nodes():
+        return -3
+
+    print_my(exp)
+
+    found_cycle = False
+    try:
+        cyc = nx.find_cycle(H_st)
+        print_alpha(exp.universal)
+        print("cycle", cyc)
+        found_cycle = True
+        for (_, v) in cyc:
+            print("-----", v)
+            print_undir(exp.myG(v))
+        sp = nx.shortest_path(H_st, source=cyc[0][1], target=-1)
+        print("shortest path", sp)
+        for v in sp[:-1]:
+            print("-----", v)
+            print_undir(exp.myG(v))
+        print("#### found a cycle; %d txs %d edges %d sp trees %d cycle length" % (len(exp.universal), len(exp.universal.edges), len(H_st), len(cyc)))
+    except nx.exception.NetworkXNoCycle:
+        pass
+
+    spd = nx.shortest_path_length(H_st, source=None, target=-1)
+
+    ok = nx.ancestors(H_st, -1)
+    print("ohoh", sorted(n for n in H_st.nodes() if n not in ok))
+
+    fin = sum(1 for v in spd.values() if v == 1)
+    worst = max(spd.values())
+    print("fin/worst", fin, worst)
+
+    print_alpha(exp.universal)
+    print("----")
+    print_dir(H_st)
+    if found_cycle:
+        return 1
+    else:
+        return 0
+
+
+#MY_EDGES = [(0, 1), (0, 2), (3, 1), (0, 4), (1, 2), (1, 4), (2, 4), (3, 4)]
+#cycle = [71, 198, 202, 142, 156, 204, 77, 101, 71]
+#for a,b in zip(cycle[:-1], cycle[1:]):
+#    print("%d -> %d  : %s" % (exp.compare(a,b)))
+
+#MY_EDGES = [(a,3+b) for a in range(3) for b in range(3)]
+
+
+#MY_EDGES = [(0,3), (1,3), (2,3), (4,0), (4,1), (4,2)]
+#MY_WEIGHTS = [(33,33), (4,3), (22,23), (2,5), (91,38)]
+
+MY_WEIGHTS = [(16,11), (38,39), (7,6), (57,58), (39,33), (41,9), (34,34), (59,24)]
+MY_EDGES = [(7,2),(7,4),(7,5),(0,1),(3,1),(6,1)] + [(a,b) for a in [2,4,5] for b in [0,3,6]]
+
+
+MY_WEIGHTS = [(4, 2), (1, 5), (1, 2), (7, 6), (1, 4), (4, 6), (10, 10)]
+MY_EDGES = [(2, 1), (3, 0), (3, 1), (3, 2), (4, 3), (5, 0), (5, 2), (5, 3), (5, 4), (6, 2), (6, 3), (6, 4)]
+
+## has a cycle!
+MY_WEIGHTS = [(3, 8), (6, 6), (10, 6), (2, 2), (3, 2), (9, 7), (7, 2)]
+MY_EDGES = [(1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2), (4, 0), (4, 1), (4, 2), (4, 3), (5, 0), (5, 1), (5, 2), (5, 3), (5, 4), (6, 0), (6, 2), (6, 3), (6, 5)]
+
+MY_WEIGHTS = [(3, 8), (6, 6), (10, 6), (2, 2), (3, 2), (9, 7), (7, 2)]
+MY_EDGES = [(2, 0), (3, 0), (3, 2), (4, 0), (4, 1), (4, 2), (4, 3), (5, 1), (5, 3), (5, 4), (6, 0), (6, 5)]
+
+MY_WEIGHTS = [(6, 12), (2, 3), (7, 4), (12, 9), (2, 3), (3, 8), (7, 14), (9, 10), (3, 9), (7, 15), (8, 4), (14, 5), (13, 9), (8, 7), (11, 1)]
+MY_EDGES = [(1, 0), (2, 1), (3, 1), (5, 4), (5, 2), (6, 0), (7, 6), (7, 5), (8, 5), (10, 3), (10, 9), (11, 8), (11, 7), (11, 10), (12, 3), (12, 6), (12, 8), (13, 7), (13, 9), (13, 12), (14, 13), (14, 11)]
+
+# 12 txs, 19 edges, 11 length cycle
+MY_WEIGHTS = [(2, 14), (1, 12), (2, 3), (2, 11), (1, 6), (4, 2), (2, 9), (1, 1), (13, 13), (5, 8), (7, 12), (9, 4)]
+MY_EDGES = [(2, 1), (3, 2), (5, 0), (5, 3), (6, 1), (6, 4), (7, 0), (7, 3), (8, 6), (8, 7), (9, 2), (9, 0), (9, 6), (10, 5), (10, 4), (10, 7), (11, 5), (11, 8), (11, 9)]
+
+# 14 txs, 21 edges, 19 length cycle, in theory taking max-q child splits
+MY_WEIGHTS = [(8, 14), (6, 14), (1, 9), (4, 10), (6, 6), (4, 11), (4, 9), (12, 4), (13, 12), (7, 10), (12, 3), (13, 8), (12, 13), (14, 12)]
+MY_EDGES = [(1, 0), (2, 0), (3, 1), (3, 2), (4, 1), (5, 3), (6, 3), (7, 2), (8, 5), (8, 4), (9, 7), (9, 6), (10, 3), (10, 7), (11, 4), (11, 10), (11, 9), (12, 10), (12, 9), (12, 5), (13, 12)]
+
+#exp = Explore(MY_WEIGHTS, MY_EDGES)
+#exp.dedupe_edges()
+#print(check_it(exp, best_children=True))
+#exit(0)
+
+for counter in range(100000):
+    if counter % 1000 == 0: print("***", counter)
+    #exp = Explore.random(17, 0.3, szwtrange=20)
+    exp = Explore.random(random.randint(15,20), 0.4, szwtrange=15)
+    exp.ensure_connected()
+    exp.dedupe_edges()
+    result = check_it(exp, best_q=True)
+    #print(counter, result)
+
