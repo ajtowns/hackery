@@ -12,14 +12,17 @@
 #      are their cycles?
 #      what's the longest path to an end-point?
 
+import enum
 import networkx as nx
 import math
 import random
 
+class ExpMode(enum.Enum):
+    DEFAULT, BEST_Q, BEST_CHILDREN = range(3)
+
 class Explore:
-    def __init__(self, weights, edges, best_q=False, best_children=False):
-        self.best_q = best_q
-        self.best_children = best_children
+    def __init__(self, weights, edges, expmode=ExpMode.DEFAULT):
+        self.expmode = expmode
 
         self.universal = nx.DiGraph()
         self.numnodes = len(weights)
@@ -106,12 +109,12 @@ class Explore:
             f2,s2 = self.get_score(k2)
             if f1*s2 >= f2*s1: continue
             score = f2*s1 - f1*s2
-            if self.best_children:
+            if self.expmode == ExpMode.BEST_CHILDREN:
                 if v not in candidates or score > candidates[v][0]:
                     candidates[v] = (score, [])
                 elif score < candidates[v][0]:
                     continue
-            elif self.best_q:
+            elif self.expmode == ExpMode.BEST_Q:
                 if score > best_splits[0]:
                     best_splits = (score, [])
                 elif score < best_splits[0]:
@@ -127,9 +130,9 @@ class Explore:
                     k = self.get_id(H)
                     assert a != v or b != u
                     assert k != n
-                    if self.best_children:
+                    if self.expmode == ExpMode.BEST_CHILDREN:
                         candidates[v][1].append((n, k))
-                    elif self.best_q:
+                    elif self.expmode == ExpMode.BEST_Q:
                         best_splits[1].append((n,k))
                     else:
                         res.add_edge(n,k)
@@ -137,7 +140,7 @@ class Explore:
             if not is_mutual:
                 res.add_edge(n, 0)
                 improvable = True
-        if self.best_children:
+        if self.expmode == ExpMode.BEST_CHILDREN:
             for v in candidates:
                 for n,k in candidates[v][1]:
                     res.add_edge(n,k)
@@ -280,7 +283,7 @@ MY_EDGES = [(2, 1), (3, 2), (5, 0), (5, 3), (6, 1), (6, 4), (7, 0), (7, 3), (8, 
 MY_WEIGHTS = [(8, 14), (6, 14), (1, 9), (4, 10), (6, 6), (4, 11), (4, 9), (12, 4), (13, 12), (7, 10), (12, 3), (13, 8), (12, 13), (14, 12)]
 MY_EDGES = [(1, 0), (2, 0), (3, 1), (3, 2), (4, 1), (5, 3), (6, 3), (7, 2), (8, 5), (8, 4), (9, 7), (9, 6), (10, 3), (10, 7), (11, 4), (11, 10), (11, 9), (12, 10), (12, 9), (12, 5), (13, 12)]
 
-#exp = Explore(MY_WEIGHTS, MY_EDGES, best_children=True)
+#exp = Explore(MY_WEIGHTS, MY_EDGES, expmode=ExpMode.BEST_CHILDREN)
 #exp.dedupe_edges()
 #print(check_it(exp))
 #exit(0)
@@ -288,7 +291,7 @@ MY_EDGES = [(1, 0), (2, 0), (3, 1), (3, 2), (4, 1), (5, 3), (6, 3), (7, 2), (8, 
 for counter in range(100000):
     if counter % 1000 == 0: print("***", counter)
     #exp = Explore.random(17, 0.3, szwtrange=20)
-    exp = Explore.random(random.randint(15,20), 0.4, szwtrange=15, best_q=True)
+    exp = Explore.random(random.randint(5,10), 0.4, szwtrange=15, expmode=ExpMode.BEST_Q)
     exp.ensure_connected()
     exp.dedupe_edges()
     result = check_it(exp)
