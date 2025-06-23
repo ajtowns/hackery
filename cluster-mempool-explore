@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 
+# Explore the behaviour of spanning-tree-based cluster mempool algorithms.
+# Process is:
+#   generate a random tx graph
+#   map every possible combination of edges to an integer (0 <= x <= 2^E)
+#   construct a new graph, where each vertex represents a spanning tree,
+#      add edges between vertices when the algorithm would switch from one spanning
+#      tree to the other
+#      edd edges to a dummy vertex for final states or if the spanning tree is split
+#   evaluate the new graph:
+#      are their cycles?
+#      what's the longest path to an end-point?
+
 import networkx as nx
 import math
 import random
