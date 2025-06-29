@@ -166,18 +166,21 @@ class Explore:
         e2 = int(math.log((n1|n2)^n1,2))
         return "%s vs %s \\n %s vs %s" % ("".join(chr(65+x) for x in ca), "".join(chr(65+x) for x in cb), edge_alpha(*self.edges[e1]), edge_alpha(*self.edges[e2]))
 
-FlowPath = dataclasses.make_dataclass('FlowPath', ["edges", "bnheap", "numneg"])
+FlowPath = dataclasses.make_dataclass('FlowPath', ["edges", "bn", "bnedge", "numneg"])
 class FlowPaths:
     def __init__(self):
-        self.fwd = FlowPath(edges=[], bnheap=[], numneg=0)
-        self.bck= FlowPath(edges=[], bnheap=[], numneg=0)
+        self.fwd = FlowPath(edges=[], bn=math.inf, bnedge=None, numneg=0)
+        self.bck= FlowPath(edges=[], bn=math.inf, bnedge=None, numneg=0)
 
     def add(self, fwd, bck, edge, flow):
         if flow < 0:
             fwd.numneg += 1
-            heapq.heappush(fwd.bnheap, (-flow, 0, edge))
-        else:
-            heapq.heappush(bck.bnheap, (flow, 1, edge))
+            if -flow < fwd.bn:
+                fwd.bn = -flow
+                fwd.bnedge = edge
+        elif flow < bck.bn:
+            bck.bn = flow
+            bck.bnedge = edge
         fwd.edges.append(edge)
 
     def add_fwd(self, edge, flow):
@@ -187,48 +190,23 @@ class FlowPaths:
         return self.add(self.bck, self.fwd, edge, flow)
 
     def what_flow(self):
-        if self.fwd.numneg > self.bck.numneg:
-            fwd, bck = self.fwd, self.bck
-        elif self.bck.numneg > self.fwd.numneg:
-            fwd, bck = self.bck, self.fwd
-        elif not self.fwd.bnheap:
-            fwd, bck = self.bck, self.fwd
-        elif self.bck.bnheap and self.bck.bnheap[0][0] > self.fwd.bnheap[0][0]:
-            fwd, bck = self.bck, self.fwd
-        else:
-            fwd, bck = self.fwd, self.bck
-
-        imp = fwd.numneg - bck.numneg
-        assert len(fwd.bnheap) >= 1 and len(fwd.bnheap) >= imp
-
-        bn, negedge, bnedge = heapq.heappop(fwd.bnheap)
-        bnimp = imp * bn
-        bnneg = 1 - negedge
-        bnimplast, bnlast, bnneglast = bnimp, bn, bnneg
-        while imp > 0:
-            imp -= 1
-            bnimplast -= bnlast * imp
-            bnlast, negedge, bnedge2 = heapq.heappop(fwd.bnheap)
-            bnimplast += bnlast * imp
-            bnneglast += (1 if negedge else -1)
-            if bnimp <= bnimplast and bnneg >= bnneglast:
-                bn, bnedge, bnimp, bnneg = bnlast, bnedge2, bnimplast, bnneglast
-
-        return bn, bnedge, fwd.edges, bck.edges
+        if self.fwd.bn != 0:
+            go_back = (self.bck.bn == 0)
+            if not go_back:
+                go_back = self.bck.numneg > self.fwd.numneg
+            if not go_back:
+                go_back = (self.bck.numneg == self.fwd.numneg) and (self.bck.bn > self.fwd.bn)
+            if go_back:
+                assert self.bck.bnedge is not None
+                return self.bck.bn, self.bck.bnedge, self.bck.edges, self.fwd.edges
+        assert self.fwd.bnedge is not None
+        return self.fwd.bn, self.fwd.bnedge, self.fwd.edges, self.bck.edges
 
 class ExploreSCC(Explore):
     # G is a spanning tree
     # GF is a spanning tree augmented with flows
     # GSCC is the graph augmented with back edges where positive flows exist,
     #    for calculating the strongly connected components
-
-    # XXX TODO
-    #   the FlowPaths logic chooses the bottleneck to avoid making any negatives positive
-    #   but that's not optimal -- what it should be doing is avoiding making fewer negatives/zeroes
-    #     on the forward path than the backward path. i think that means keeping a heap of each
-    #     potential bottleneck (negatives in this direction, positives in the other direction),
-    #     then popping off any extras, then choosing a bottleneck.
-    #   ideally this would be an "expmode" option.
 
     def __init__(self, weights, edges):
         self.debug = False
